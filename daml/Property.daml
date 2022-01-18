@@ -1,0 +1,205 @@
+module Property where
+
+import DA.Assert
+import DA.Time
+import Payment
+
+template Property
+  with
+    issuer: Party
+    owner: Party
+    address: Text
+    userAdmin: Party
+    issued: Time
+    lastPrice: Decimal
+    royaltyRate: Decimal
+  where
+    signatory issuer, owner
+    key (owner, address): (Party, Text)
+    maintainer key._1 
+
+    controller owner can
+      nonconsuming ListProperty: ContractId Listing
+        with
+          listingPrice : Decimal
+          public: Party
+        do
+          create Listing
+            with
+              ..
+
+      UpdateRoyaltyRate: ContractId Property
+        with
+          newRoyaltyRate : Decimal
+        do 
+          issuer === owner
+          create this with
+            royaltyRate = newRoyaltyRate
+
+      CreatePropertyTransfer : ContractId PropertyTransfer
+        with
+          newOwner : Party
+          newPrice : Decimal
+        do create PropertyTransfer with property = this; newOwner; newPrice; userAdmin
+
+    controller issuer can
+      ArchiveProperty: ()
+        do 
+          issuer === owner
+          return ()
+template PropertyTransfer
+  with
+    newOwner : Party
+    newPrice : Decimal
+    property : Property
+    userAdmin : Party
+  where
+    signatory property.owner
+    observer userAdmin
+
+    controller newOwner can
+      AcceptPropertyTransfer : ContractId Property
+        do
+          create Payable
+            with
+              from = newOwner
+              to = property.owner
+              amount = newPrice
+              reference = "Principal for `" <> property.address <> "`."
+              ..
+
+          create Payable
+            with
+              from = newOwner
+              to = property.userAdmin
+              amount = newPrice * 0.04
+              reference = "Transaction fee for `" <> property.address <> "`."
+              ..
+
+          if newOwner == property.issuer
+            then return None 
+            else Some <$> create Payable
+              with
+                from = newOwner
+                to = property.owner
+                amount = newPrice * property.royaltyRate
+                reference = "Royalty for `" <> property.address <> "`."
+                ..
+
+          create property with
+            owner = newOwner
+            lastPrice = newPrice
+
+template Listing
+  with 
+    issuer: Party
+    owner: Party
+    address: Text
+    userAdmin: Party
+    issued: Time
+    listingPrice: Decimal
+    lastPrice: Decimal
+    royaltyRate: Decimal
+    public: Party
+  where
+    signatory owner
+    observer public
+    key (owner, address): (Party, Text)
+    maintainer key._1 
+
+    controller owner can
+      ArchiveListing: ()
+        do return ()
+
+    nonconsuming choice SubmitOffer: ContractId PropertyOffer
+      with
+        newOwner: Party
+        offeredAmount: Decimal
+        accountCid: ContractId BankAccount
+        currentTime: Time
+      controller newOwner
+        do
+          bankAccount <- fetch accountCid
+
+          let propertyPrice = listingPrice
+          let royaltyFee = listingPrice * royaltyRate
+          let transactionFee = listingPrice * 0.04
+          let totalPrice = propertyPrice + royaltyFee + transactionFee
+
+          assertMsg "User can't afford to make offer on property" (bankAccount.accountBalance >= totalPrice)
+
+          create PropertyOffer with 
+            issuer = newOwner
+            prop_owner = owner
+            ..
+
+template PropertyOffer
+  with
+    issuer: Party
+    prop_owner: Party
+    address: Text
+    userAdmin: Party
+    issued: Time
+    offeredAmount: Decimal
+    listingPrice: Decimal
+    lastPrice: Decimal
+    royaltyRate: Decimal
+  where
+    signatory issuer, prop_owner
+    key (issuer, prop_owner, address): (Party, Party, Text)
+    maintainer key._2 
+
+    observer userAdmin
+
+    controller issuer can
+      PullOffer: ()
+        do return ()
+
+      UpdateOffer: ContractId PropertyOffer
+        with
+          newOfferedAmount : Decimal
+        do 
+          create this with
+            offeredAmount = newOfferedAmount
+
+    controller prop_owner can
+      RejectOffer: ()
+        do return ()
+
+      nonconsuming ProposeCounterOffer: ContractId CounterOffer
+        with 
+          offerCid : ContractId PropertyOffer
+          counterAmount : Decimal
+          currentTime : Time
+        do
+          create CounterOffer with
+            ..
+
+      AcceptCurrentOffer: ContractId PropertyTransfer
+        do
+          currentTime <- getTime
+
+          let passedTime = convertRelTimeToMicroseconds (subTime currentTime issued)
+          let fiveMinutes = convertRelTimeToMicroseconds (minutes 5)
+
+          assertMsg ("This offer has expired" <> show passedTime)(passedTime<fiveMinutes)
+          
+          exerciseByKey @Listing (prop_owner, address) ArchiveListing
+  
+          (propertyCid, _) <- fetchByKey @Property (prop_owner, address)
+
+          exercise propertyCid CreatePropertyTransfer 
+            with 
+              newOwner = issuer
+              newPrice = offeredAmount
+
+template CounterOffer
+  with 
+    counterAmount : Decimal
+    offeredAmount : Decimal
+    prop_owner : Party
+    issuer : Party
+    offerCid : ContractId PropertyOffer
+  where
+    signatory prop_owner
+    observer issuer

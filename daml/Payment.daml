@@ -1,0 +1,72 @@
+module Payment where
+
+template Payable
+  with
+    amount: Decimal
+    from: Party
+    to: Party
+    reference: Text
+    userAdmin: Party 
+  where 
+    signatory from
+    observer to, userAdmin
+
+    controller from can
+      ClaimPaid: ContractId PaymentClaim 
+        with
+          transactionId: Text
+        do
+          create PaymentClaim with ..
+
+template PaymentClaim
+  with
+    amount: Decimal
+    from: Party
+    to: Party
+    reference: Text 
+    transactionId: Text 
+  where 
+    signatory from
+    
+    controller to can
+      Receive: ContractId Receipt
+        do
+          received <- getTime 
+          create Receipt 
+            with ..
+
+template Receipt
+  with
+    amount: Decimal
+    from: Party
+    to: Party
+    reference: Text 
+    transactionId: Text
+    received: Time
+  where
+    signatory to, from 
+
+    controller from can
+      Dismiss: ()
+        do return ()
+
+template BankAccount
+  with
+    accountOwner : Party
+    accountNumber : Text
+    accountBalance : Decimal
+  where 
+    signatory accountOwner
+    ensure accountBalance >= 0.0
+
+    key (accountOwner, accountNumber): (Party, Text)
+    maintainer key._1
+
+    controller accountOwner can
+      UpdateBalance: ContractId BankAccount
+        with
+          newFunds : Decimal
+        do
+          create this
+            with
+              accountBalance = accountBalance + newFunds

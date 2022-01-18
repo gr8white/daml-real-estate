@@ -1,0 +1,44 @@
+module User where
+
+import Property
+import Payment
+
+template User with
+    userAdmin: Party
+    user: Party
+    accountNumber : Text
+  where
+    signatory user
+    key user : Party
+    maintainer key
+
+    controller user can
+      nonconsuming MintProperty: ContractId Property
+        with
+          address : Text
+          initialPrice : Decimal
+          royaltyRate : Decimal
+        do
+          issued <- getTime
+
+          (_, bankAccount) <- fetchByKey @BankAccount (user, accountNumber)
+
+          let mintFee = 10000.0 * 1.04 : Decimal
+
+          assertMsg "User can't afford to mint new property" (bankAccount.accountBalance >= mintFee)
+
+          create Payable
+            with
+              from = user
+              to = userAdmin
+              amount = 10000.0
+              reference = "Mint Fee for `" <> address <> "`."
+              ..
+
+          create Property
+            with 
+              lastPrice = initialPrice
+              issuer = user
+              owner = user
+              ..
+

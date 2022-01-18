@@ -1,0 +1,173 @@
+module Main where
+
+import Property
+import User
+import Payment
+
+import Daml.Script
+import DA.Time
+
+
+initialize : Script ()
+initialize = do
+  now <- getTime
+  sydni <- allocatePartyWithHint "Sydni" (PartyIdHint "Sydni")
+  derrick <- allocatePartyWithHint "Derrick" (PartyIdHint "Derrick")
+  milo <- allocatePartyWithHint "Milo" (PartyIdHint "Milo")
+  userAdmin <- allocatePartyWithHint "UserAdmin" (PartyIdHint "UserAdmin")
+
+  public <- allocatePartyWithHint "public" (PartyIdHint "public")
+  adminParty <- allocatePartyWithHint "adminParty" (PartyIdHint "adminParty")
+
+  -- Create Users
+  sydniAccount <- submit sydni do
+    createCmd BankAccount 
+      with 
+        accountOwner = sydni
+        accountBalance = 350000.0
+        accountNumber = "account1"
+
+  -- UpdateAccount
+  -- sydniAccoun <- submit sydni do
+  --   exerciseCmd sydniAccount UpdateBalance
+  --     with
+  --       newFunds = 50.0
+
+  -- sydniAccoun <- submit sydni do
+  --   exerciseCmd sydniAccount UpdateBalance
+  --     with
+  --       newFunds = -50.0
+
+  sydniUser <- submit sydni do
+    createCmd User
+      with
+        user = sydni
+        userAdmin = userAdmin
+        accountNumber = "account1"
+
+  derrickAccount <- submit derrick do
+    createCmd BankAccount 
+      with 
+        accountOwner = derrick
+        accountBalance = 350000.0
+        accountNumber = "account2"
+
+  derrickUser <- submit derrick do
+    createCmd User
+      with
+        user = derrick
+        userAdmin = userAdmin
+        accountNumber = "account2"
+
+  miloAccount <- submit milo do
+    createCmd BankAccount 
+      with 
+        accountOwner = milo
+        accountBalance = 350000.0
+        accountNumber = "account3"
+
+  miloUser <- submit milo do
+    createCmd User
+      with
+        user = milo
+        userAdmin = userAdmin
+        accountNumber = "account3"
+
+  -- Mint new property
+  property1 <- submit sydni do
+    exerciseCmd sydniUser MintProperty
+      with
+        address = "address1"
+        initialPrice = 100000.0
+        royaltyRate = 0.0
+
+  property2 <- submit derrick do
+    exerciseCmd derrickUser MintProperty
+      with
+        address = "address2"
+        initialPrice = 100000.0
+        royaltyRate = 0.03
+
+  property3 <- submit milo do
+    exerciseCmd miloUser MintProperty
+      with
+        address = "address3"
+        initialPrice = 100000.0
+        royaltyRate = 0.0
+
+  -- List property
+  property1_listing <- submit sydni do
+    exerciseCmd property1 ListProperty
+      with
+        listingPrice = 150000.0
+        public = public
+
+  property2_listing <- submit derrick do
+    exerciseCmd property2 ListProperty
+      with
+        listingPrice =  200000.0
+        public = public
+
+  property3_listing <- submit milo do
+    exerciseCmd property3 ListProperty
+      with
+        listingPrice =  175000.0
+        public = public
+
+  -- Make offer on listings
+  property1_offer <- submitMulti [derrick] [public] do
+    exerciseCmd property1_listing SubmitOffer
+      with
+        newOwner = derrick
+        offeredAmount = 140000.0
+        accountCid = derrickAccount
+        currentTime = now
+
+  property2_offer <- submitMulti [milo] [public] do
+    exerciseCmd property2_listing SubmitOffer
+      with
+        newOwner = milo
+        offeredAmount = 190000.0
+        accountCid = miloAccount
+        currentTime = now
+
+  property3_offer <- submitMulti [sydni] [public] do
+    exerciseCmd property3_listing SubmitOffer
+      with
+        newOwner = sydni
+        offeredAmount = 140000.0
+        accountCid = sydniAccount
+        currentTime = now
+
+  -- Offer choices
+  -- Issuer - Pull offer
+  -- submit derrick do
+  --   exerciseCmd property1_offer PullOffer
+
+  -- Issuer - Update offer amount
+  property1_offer <- submit derrick do
+    exerciseCmd property1_offer UpdateOffer
+      with newOfferedAmount = 135000.0
+
+  -- Owner - Reject offer
+  submit milo do 
+    exerciseCmd property3_offer RejectOffer
+
+  -- Owner - Counter Offer
+  property1_offer <- submit sydni do 
+    exerciseCmd property1_offer ProposeCounterOffer
+      with 
+      offerCid = property1_offer
+      counterAmount = 140000.0
+      currentTime = now
+
+  now <- passTime (minutes 3) -- passing a time over 5 minutes archives the offer
+
+  -- Owner - Accept Offer
+  property1_transfer <- submit derrick do
+    exerciseCmd property2_offer AcceptCurrentOffer
+
+  -- submit milo do
+  --   exerciseCmd property1_transfer AcceptPropertyTransfer
+
+  return ()
