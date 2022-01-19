@@ -12,33 +12,38 @@ template User with
     key user : Party
     maintainer key
 
-    controller user can
-      nonconsuming MintProperty: ContractId Property
-        with
-          address : Text
-          initialPrice : Decimal
-          royaltyRate : Decimal
+    nonconsuming choice MintProperty: (ContractId Property, ContractId BankAccount)
+      with
+        address : Text
+        initialPrice : Decimal
+        royaltyRate : Decimal
+      controller user
         do
           issued <- getTime
 
-          (_, bankAccount) <- fetchByKey @BankAccount (user, accountNumber)
+          (bankAccountCid, bankAccount) <- fetchByKey @BankAccount (user, accountNumber)
 
           let mintFee = 10000.0 * 1.04 : Decimal
 
           assertMsg "User can't afford to mint new property" (bankAccount.accountBalance >= mintFee)
 
+          updatedAccount <- exercise bankAccountCid UpdateBalance
+            with
+              newFunds = -mintFee
+
           create Payable
             with
               from = user
               to = userAdmin
-              amount = 10000.0
+              amount = mintFee
               reference = "Mint Fee for `" <> address <> "`."
               ..
 
-          create Property
+          newProperty <- create Property
             with 
               lastPrice = initialPrice
               issuer = user
               owner = user
               ..
 
+          return (newProperty, updatedAccount)

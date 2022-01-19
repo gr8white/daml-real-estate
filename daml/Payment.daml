@@ -46,9 +46,9 @@ template Receipt
   where
     signatory to, from 
 
-    controller from can
-      Dismiss: ()
-        do return ()
+    choice Dismiss: ()
+      controller from
+      do return ()
 
 template BankAccount
   with
@@ -62,11 +62,14 @@ template BankAccount
     key (accountOwner, accountNumber): (Party, Text)
     maintainer key._1
 
-    controller accountOwner can
-      UpdateBalance: ContractId BankAccount
-        with
-          newFunds : Decimal
+    choice UpdateBalance: ContractId BankAccount
+      with
+        newFunds : Decimal
+      controller accountOwner
         do
           create this
             with
               accountBalance = accountBalance + newFunds
+
+-- To Do:
+-- Get rid of controller _ can pattern

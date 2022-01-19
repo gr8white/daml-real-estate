@@ -74,21 +74,21 @@ initialize = do
         accountNumber = "account3"
 
   -- Mint new property
-  property1 <- submit sydni do
+  (property1, sydniAccount) <- submit sydni do
     exerciseCmd sydniUser MintProperty
       with
         address = "address1"
         initialPrice = 100000.0
         royaltyRate = 0.0
 
-  property2 <- submit derrick do
+  (property2, derrickAccount) <- submit derrick do
     exerciseCmd derrickUser MintProperty
       with
         address = "address2"
         initialPrice = 100000.0
         royaltyRate = 0.03
 
-  property3 <- submit milo do
+  (property3, miloAccount) <- submit milo do
     exerciseCmd miloUser MintProperty
       with
         address = "address3"
@@ -154,20 +154,25 @@ initialize = do
     exerciseCmd property3_offer RejectOffer
 
   -- Owner - Counter Offer
-  property1_offer <- submit sydni do 
+  property1_CounterOffer <- submit sydni do 
     exerciseCmd property1_offer ProposeCounterOffer
       with 
       offerCid = property1_offer
       counterAmount = 140000.0
       currentTime = now
 
-  now <- passTime (minutes 3) -- passing a time over 5 minutes archives the offer
+  now <- passTime (minutes 3) -- passing a time over 5 minutes archives the property1_counterOffer
+
+  property1_offer <- submit derrick do
+      exerciseCmd property1_CounterOffer AcceptCounterOffer
 
   -- Owner - Accept Offer
-  property1_transfer <- submit derrick do
-    exerciseCmd property2_offer AcceptCurrentOffer
+  property1_transfer <- submit sydni do
+    exerciseCmd property1_offer AcceptCurrentOffer
 
-  -- submit milo do
-  --   exerciseCmd property1_transfer AcceptPropertyTransfer
+  submit derrick do
+    exerciseCmd property1_transfer AcceptPropertyTransfer
+      with
+      accountCid = derrickAccount
 
   return ()

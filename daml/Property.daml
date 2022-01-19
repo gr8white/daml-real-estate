@@ -18,35 +18,38 @@ template Property
     key (owner, address): (Party, Text)
     maintainer key._1 
 
-    controller owner can
-      nonconsuming ListProperty: ContractId Listing
-        with
-          listingPrice : Decimal
-          public: Party
+    nonconsuming choice ListProperty: ContractId Listing
+      with
+        listingPrice : Decimal
+        public: Party
+      controller owner
         do
           create Listing
             with
               ..
 
-      UpdateRoyaltyRate: ContractId Property
-        with
-          newRoyaltyRate : Decimal
+    choice UpdateRoyaltyRate: ContractId Property
+      with
+        newRoyaltyRate : Decimal
+      controller owner
         do 
           issuer === owner
           create this with
             royaltyRate = newRoyaltyRate
 
-      CreatePropertyTransfer : ContractId PropertyTransfer
-        with
-          newOwner : Party
-          newPrice : Decimal
+    nonconsuming choice CreatePropertyTransfer : ContractId PropertyTransfer
+      with
+        newOwner : Party
+        newPrice : Decimal
+      controller owner
         do create PropertyTransfer with property = this; newOwner; newPrice; userAdmin
 
-    controller issuer can
-      ArchiveProperty: ()
+    choice ArchiveProperty: ()
+      controller issuer
         do 
           issuer === owner
           return ()
+
 template PropertyTransfer
   with
     newOwner : Party
@@ -55,11 +58,16 @@ template PropertyTransfer
     userAdmin : Party
   where
     signatory property.owner
-    observer userAdmin
+    observer userAdmin, newOwner
 
-    controller newOwner can
-      AcceptPropertyTransfer : ContractId Property
+    choice AcceptPropertyTransfer : (ContractId Property, ContractId BankAccount)
+      with
+        accountCid: ContractId BankAccount
+      controller newOwner
         do
+          let transactionFee = newPrice * 0.04 : Decimal
+          let royaltyFee = 0
+
           create Payable
             with
               from = newOwner
@@ -72,7 +80,7 @@ template PropertyTransfer
             with
               from = newOwner
               to = property.userAdmin
-              amount = newPrice * 0.04
+              amount = transactionFee
               reference = "Transaction fee for `" <> property.address <> "`."
               ..
 
@@ -86,9 +94,19 @@ template PropertyTransfer
                 reference = "Royalty for `" <> property.address <> "`."
                 ..
 
-          create property with
+          let loyaltyFee = if newOwner == property.issuer then 0.0 else newPrice * property.royaltyRate
+
+          let totalPayable = newPrice + transactionFee + loyaltyFee
+
+          updatedAccount <- exercise accountCid UpdateBalance
+            with
+              newFunds = -totalPayable
+
+          updatedProperty <- create property with
             owner = newOwner
             lastPrice = newPrice
+
+          return (updatedProperty, updatedAccount)
 
 template Listing
   with 
@@ -107,8 +125,8 @@ template Listing
     key (owner, address): (Party, Text)
     maintainer key._1 
 
-    controller owner can
-      ArchiveListing: ()
+    choice ArchiveListing: ()
+      controller owner
         do return ()
 
     nonconsuming choice SubmitOffer: ContractId PropertyOffer
@@ -151,31 +169,34 @@ template PropertyOffer
 
     observer userAdmin
 
-    controller issuer can
-      PullOffer: ()
+    choice PullOffer: ()
+      controller issuer
         do return ()
 
-      UpdateOffer: ContractId PropertyOffer
-        with
-          newOfferedAmount : Decimal
+    choice UpdateOffer: ContractId PropertyOffer
+      with
+        newOfferedAmount : Decimal
+      controller issuer
         do 
           create this with
             offeredAmount = newOfferedAmount
 
-    controller prop_owner can
-      RejectOffer: ()
+    choice RejectOffer: ()
+      controller prop_owner
         do return ()
 
-      nonconsuming ProposeCounterOffer: ContractId CounterOffer
-        with 
-          offerCid : ContractId PropertyOffer
-          counterAmount : Decimal
-          currentTime : Time
+    nonconsuming choice ProposeCounterOffer: ContractId CounterOffer
+      with 
+        offerCid : ContractId PropertyOffer
+        counterAmount : Decimal
+        currentTime : Time
+      controller prop_owner
         do
           create CounterOffer with
             ..
 
-      AcceptCurrentOffer: ContractId PropertyTransfer
+    choice AcceptCurrentOffer: ContractId PropertyTransfer
+      controller prop_owner
         do
           currentTime <- getTime
 
@@ -203,3 +224,13 @@ template CounterOffer
   where
     signatory prop_owner
     observer issuer
+
+    choice PullCounterOffer: ()
+      controller prop_owner
+        do return ()
+
+    choice AcceptCounterOffer: ContractId PropertyOffer
+      controller issuer
+        do
+        exercise offerCid UpdateOffer with
+          newOfferedAmount = counterAmount
